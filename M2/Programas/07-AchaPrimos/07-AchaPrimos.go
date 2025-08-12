@@ -53,8 +53,7 @@ func main() {
 
 // Generates a slice of size, size filled with random numbers
 func generateSlice(size int) []int {
-	slice := make([]int, size, size)
-	rand.Seed(time.Now().UnixNano())
+	slice := make([]int, size)
 	for i := 0; i < size; i++ {
 		slice[i] = rand.Intn(INTERVALO) // - rand.Intn(INTERVALO)
 	}
@@ -63,7 +62,7 @@ func generateSlice(size int) []int {
 
 func contaPrimosSeq(s []int) int {
 	result := 0
-	for i := 0; i < N; i++ {
+	for i := range s {
 		if isPrime(s[i]) {
 			result++
 		}

@@ -59,6 +59,63 @@ func somaConcCh(r *Nodo, s chan int) { // recursiva com canais
 	}
 }
 
+// -------- BUSCA SEQ ----------
+// busca sequencial recursiva
+func busca(r *Nodo, val int) bool {
+	if r == nil {
+		return false
+	}
+	if r.v == val {
+		return true
+	}
+	return busca(r.e, val) || busca(r.d, val)
+}
+
+// -------- BUSCA CONC ----------
+// busca concorrente usando canais
+func buscaConc(r *Nodo, val int) bool {
+	c := make(chan bool)
+	go buscaConcCh(r, val, c)
+	return <-c
+}
+
+func buscaConcCh(r *Nodo, val int, c chan bool) {
+	if r == nil {
+		c <- false
+		return
+	}
+	if r.v == val {
+		c <- true
+		return
+	}
+	c1 := make(chan bool)
+	c2 := make(chan bool)
+	go buscaConcCh(r.e, val, c1)
+	go buscaConcCh(r.d, val, c2)
+	c <- (<-c1 || <-c2)
+}
+
+// -------- SEPARA PARES E IMPARES ----------
+func separaParesEImpares(r *Nodo) {
+	pares := []int{}
+	impares := []int{}
+	collectValores(r, &pares, &impares)
+	fmt.Println("Valores pares:", pares)
+	fmt.Println("Valores ímpares:", impares)
+}
+
+func collectValores(r *Nodo, pares *[]int, impares *[]int) {
+	if r != nil {
+		if r.v%2 == 0 {
+			*pares = append(*pares, r.v)
+		} else {
+			*impares = append(*impares, r.v)
+		}
+		collectValores(r.e, pares, impares)
+		collectValores(r.d, pares, impares)
+	}
+}
+
 // ---------   agora vamos criar a arvore e usar as funcoes acima
 
 func main() {
