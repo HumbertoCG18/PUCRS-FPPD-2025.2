@@ -1,19 +1,20 @@
 // por Fernando Dotti - fldotti.github.io - PUCRS - Escola Politécnica
-// Este ee um exemplo muito simples de como modelar uma topologia com N nodos.
-// A topologia ee modelada por uma matriz de incidencia.
+// Este é um exemplo muito simples de como modelar uma topologia com N nodos.
+// A topologia é modelada por uma matriz de incidencia.
 // Basta adicionar 1s na matriz, na posicao [i][j] para criar arestas direcionadas do nodo i para o nodo j.
 // Nesta modelagem cada nodo tem um canal de entrada.
 // Com a funcao broadcast um nodo manda para todos vizinhos.
 // j é dito vizinho de i se existe topology[i][j]=1
+
 // ATENÇÃO:
-//    1) a topologia criada no exemplo abaixo é um **grafo aciclico dirigido.**
+//    1) A topologia criada no exemplo abaixo é um **grafo aciclico dirigido.**
 //       cada aresta tem somente uma direcao (ex.: 0 manda para 1, mas 1 nao manda para 0)
 //       Assim, um nodo pode receber mais de uma vez uma mensagem,
 //       mas nesta topologia a mensagem nao entra em ciclo.
+
 // EXERCÍCIO:
-//    1) rode o exemplo.   note que cada mensagem é repassada mais de uma vez em alguns nodos
-//    2) Implemente a eliminação de duplicatas.
-//       Cada nodo deve repassar a mensagem apenas a primeira vez que a recebe.
+//    1) Rode o exemplo.   note que cada mensagem é repassada mais de uma vez em alguns nodos
+//    2) Implemente a eliminação de duplicatas. Cada nodo deve repassar a mensagem apenas a primeira vez que a recebe.
 
 package main
 
