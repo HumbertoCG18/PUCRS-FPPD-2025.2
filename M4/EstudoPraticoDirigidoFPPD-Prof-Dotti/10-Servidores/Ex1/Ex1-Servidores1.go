@@ -1,11 +1,13 @@
 // por Fernando Dotti - fldotti.github.io - PUCRS - Escola Politécnica
 // servidor com criacao dinamica de thread de servico
+
 // Problema:
-//   considere um servidor que recebe pedidos por um canal (representando uma conexao)
+//   Considere um servidor que recebe pedidos por um canal (representando uma conexao)
 //   ao receber o pedido, sabe-se através de qual canal (conexao) responder ao cliente.
 //   Abaixo uma solucao sequencial para o servidor.
-// Exercicio
-//   deseja-se tratar os clientes concorrentemente, e nao sequencialmente.
+
+// Exercicio:
+//   Deseja-se tratar os clientes concorrentemente, e nao sequencialmente.
 //   como ficaria a solucao ?
 
 package main

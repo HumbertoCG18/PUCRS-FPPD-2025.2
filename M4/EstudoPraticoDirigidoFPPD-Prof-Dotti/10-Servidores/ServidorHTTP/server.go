@@ -8,7 +8,7 @@
 //     http://127.0.0.1:8080/help   ou
 //     http://127.0.0.1:8080/f1
 //
-// as funcoes helloWorld, help e f1 abaixo serão respectivamente
+// As funcoes helloWorld, help e f1 abaixo serão respectivamente
 // ativadas no servidor, gerando a resposta enviada ao browser
 // tente entender o modelo subjascente de troca de mensagens e
 // tratamento de conexoes (canais)
@@ -50,5 +50,4 @@ func main() {
 	//       então passa o pedido para helloWorld
 	//  se browser nesta maquina acessa http://127.0.0.1:8080/help
 	//       então passa o pedido para help
-	// ...
 }

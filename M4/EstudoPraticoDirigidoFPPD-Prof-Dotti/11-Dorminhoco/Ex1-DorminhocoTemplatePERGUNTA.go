@@ -1,71 +1,234 @@
 // por Fernando Dotti - fldotti.github.io - PUCRS - Escola Politécnica
-// PROBLEMA:
-//   o dorminhoco especificado no arquivo Ex1-ExplanacaoDoDorminhoco.pdf nesta pasta
-// ESTE ARQUIVO
-//   Um template para criar um anel generico.
-//   Adapte para o problema do dorminhoco.
-//   Nada está dito sobre como funciona a ordem de processos que batem.
-//   O ultimo leva a rolhada ...
-//   ESTE  PROGRAMA NAO FUNCIONA.    É UM RASCUNHO COM DICAS.
-
+// PROBLEMA: O Dorminhoco
+//   Jogo de cartas onde jogadores passam cartas em anel
+//   Objetivo: formar 4 cartas iguais e "bater" na mesa
+//   O último a bater é o "dorminhoco" e perde o jogo
 
 package main
 
 import (
 	"fmt"
+	"math/rand"
+	"time"
 )
 
-const NJ = 5           // numero de jogadores
-const M = 4            // numero de cartas na mao
+const NJ = 5 // numero de jogadores
+const M = 4  // numero de cartas na mao
 
-type carta string      // carta é um strirng
+type carta string // carta é um string
+type estado int
 
-var ch [NJ]chan carta  // NJ canais de itens tipo carta  
+const (
+	jogando = iota
+	prontoParaBater
+	jaBateu
+)
 
-func jogador(id int, in chan carta, out chan carta, cartasIniciais []carta, ... ) {
-	mao := cartasIniciais    // estado local - as cartas na mao do jogador
-	nroDeCartas := M         // quantas cartas ele tem 
-    cartaRecebida := " "     // carta recebida é vazia
-    estado := jogando
+var ch [NJ]chan carta     // canais para passar cartas
+var chBatida chan int     // canal para registrar batidas
+var chParar [NJ]chan bool // canais para parar jogadores
+var ordemBatida []int     // ordem dos jogadores que bateram
+
+func criarBaralho() []carta {
+	// Cria baralho com NJ tipos de cartas, M+1 cartas de cada tipo
+	var baralho []carta
+	tipos := []string{"A", "B", "C", "D", "E", "F", "G", "H"}
+
+	for i := 0; i < NJ; i++ {
+		for j := 0; j < M+1; j++ {
+			baralho = append(baralho, carta(tipos[i]))
+		}
+	}
+
+	// Embaralha
+	rand.Seed(time.Now().UnixNano())
+	for i := len(baralho) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		baralho[i], baralho[j] = baralho[j], baralho[i]
+	}
+
+	return baralho
+}
+
+func escolherCartas(baralho *[]carta, n int) []carta {
+	cartas := make([]carta, n)
+	for i := 0; i < n; i++ {
+		cartas[i] = (*baralho)[0]
+		*baralho = (*baralho)[1:]
+	}
+	return cartas
+}
+
+func temQuatroIguais(mao []carta) bool {
+	contador := make(map[carta]int)
+	for _, c := range mao {
+		contador[c]++
+		if contador[c] == 4 {
+			return true
+		}
+	}
+	return false
+}
+
+func jogador(id int, in chan carta, out chan carta, cartasIniciais []carta) {
+	mao := make([]carta, len(cartasIniciais))
+	copy(mao, cartasIniciais)
+	estadoAtual := jogando
+
+	fmt.Printf("Jogador %d iniciado com cartas: %v\n", id, mao)
 
 	for {
-		if estado==jogando
-			{
-			// cartaRecebida = <-in     recebe carta na entrada
-			//                          e processa, escreve outra na saida,
-			//                          fica ou nao pronto para bater
-			// OU
-			// algem bate antes ?
-			// 
-		} else { // estado é prontoParaBater  
-			// bate
-			// OU
-			// algem bate antes ?
+		select {
+		case <-chParar[id]:
+			fmt.Printf("Jogador %d parou\n", id)
+			return
+
+		default:
+			if estadoAtual == jogando {
+				// Verifica se já tem 4 cartas iguais
+				if temQuatroIguais(mao) {
+					estadoAtual = prontoParaBater
+					fmt.Printf("Jogador %d está pronto para bater! Mão: %v\n", id, mao)
+
+					// Tenta bater
+					select {
+					case chBatida <- id:
+						estadoAtual = jaBateu
+						fmt.Printf("Jogador %d BATEU!\n", id)
+						continue
+					case <-chParar[id]:
+						return
+					default:
+						// Não conseguiu bater ainda, continua jogando
+					}
+				}
+
+				// Recebe carta (com timeout)
+				select {
+				case cartaRecebida := <-in:
+					// Escolhe carta aleatória para passar
+					indiceParaPassar := rand.Intn(len(mao))
+					cartaParaPassar := mao[indiceParaPassar]
+
+					// Substitui carta na mão
+					mao[indiceParaPassar] = cartaRecebida
+
+					// Passa carta para próximo jogador
+					select {
+					case out <- cartaParaPassar:
+					case <-chParar[id]:
+						return
+					case <-time.After(100 * time.Millisecond):
+						// Timeout para evitar deadlock
+					}
+
+				case <-chParar[id]:
+					return
+				case <-time.After(10 * time.Millisecond):
+					// Timeout para não bloquear indefinidamente
+				}
+
+			} else if estadoAtual == prontoParaBater {
+				// Tenta bater
+				select {
+				case chBatida <- id:
+					estadoAtual = jaBateu
+					fmt.Printf("Jogador %d BATEU!\n", id)
+				case <-chParar[id]:
+					return
+				default:
+					// Continua tentando bater
+				}
+			} else {
+				// Já bateu, só espera o jogo terminar
+				select {
+				case <-chParar[id]:
+					return
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
 		}
 	}
 }
 
 func main() {
-	// cria canais de passagem de cartas
+	fmt.Println("=== JOGO DO DORMINHOCO ===")
+
+	// Inicializa canais
+	chBatida = make(chan int, NJ)
 	for i := 0; i < NJ; i++ {
-		ch[i] = make(chan carta)
+		ch[i] = make(chan carta, 10) // Buffer para evitar deadlocks
+		chParar[i] = make(chan bool)
 	}
 
-	// cria canais para bater ? 
+	// Cria e distribui cartas
+	baralho := criarBaralho()
+	fmt.Printf("Baralho criado com %d cartas\n", len(baralho))
 
-	// baralho = cria um baralho com NJ*M cartas
-
-	for i := 0; i < NJ; i++ {   // cria os NJ jogadores
-
-		// cartasEscolhidas = escolhe aleatoriamente (e tira) M cartas do baralho para o jogador i
-
-		go jogador(i, ch[i], ch[(i+1)%NJ], cartasEscolhidas , ...)    // cria jogador i conectado com i-1 e i+1, e com as cartas
+	// Inicia jogadores
+	for i := 0; i < NJ; i++ {
+		cartasIniciais := escolherCartas(&baralho, M)
+		go jogador(i, ch[i], ch[(i+1)%NJ], cartasIniciais)
 	}
-	
-	// escolhe um jogador j e escreve uma carta em seu canal de entrada
 
-	// espera ate jogadores baterem no(s) canal(is) de batida
-	// registra ordem de batida
+	// Inicia o jogo dando a primeira carta para um jogador aleatório
+	if len(baralho) > 0 {
+		jogadorInicial := rand.Intn(NJ)
+		primeiraCartaExtra := escolherCartas(&baralho, 1)[0]
+		fmt.Printf("Dando carta %s para jogador %d para iniciar\n", primeiraCartaExtra, jogadorInicial)
+		ch[jogadorInicial] <- primeiraCartaExtra
+	}
+
+	// Aguarda batidas dos jogadores
+	fmt.Println("Aguardando batidas...")
+	ordemBatida = make([]int, 0)
+
+	// Declara variáveis antes do loop para evitar problema com goto
+	var dorminhoco int
+	jogadoresQueBateram := make(map[int]bool)
+
+	// Coleta batidas até que NJ-1 jogadores tenham batido
+	for len(ordemBatida) < NJ-1 {
+		select {
+		case jogadorQueBateu := <-chBatida:
+			ordemBatida = append(ordemBatida, jogadorQueBateu)
+			fmt.Printf("Batida #%d: Jogador %d\n", len(ordemBatida), jogadorQueBateu)
+		case <-time.After(5 * time.Second):
+			fmt.Println("Timeout - Encerrando jogo")
+			goto fim
+		}
+	}
+
+	// Determina o dorminhoco (quem não bateu)
+	for _, j := range ordemBatida {
+		jogadoresQueBateram[j] = true
+	}
+
+	for i := 0; i < NJ; i++ {
+		if !jogadoresQueBateram[i] {
+			dorminhoco = i
+			break
+		}
+	}
+
+fim:
+	// Para todos os jogadores
+	for i := 0; i < NJ; i++ {
+		select {
+		case chParar[i] <- true:
+		default:
+		}
+	}
+
+	// Mostra resultados
+	fmt.Println("\n=== RESULTADO ===")
+	fmt.Println("Ordem de batidas:")
+	for i, j := range ordemBatida {
+		fmt.Printf("%d° lugar: Jogador %d\n", i+1, j)
+	}
+	if len(ordemBatida) == NJ-1 {
+		fmt.Printf("DORMINHOCO: Jogador %d (perdeu!)\n", dorminhoco)
+	}
+
+	time.Sleep(100 * time.Millisecond) // Aguarda goroutines terminarem
 }
-
-

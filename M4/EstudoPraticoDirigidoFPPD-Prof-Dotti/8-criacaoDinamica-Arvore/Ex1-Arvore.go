@@ -1,24 +1,3 @@
-// por Fernando Dotti - PUCRS
-// dado abaixo um exemplo de estrutura em arvore, uma arvore inicializada
-// e uma operação de caminhamento, pede-se fazer:
-//   1.a) a operação que soma todos elementos da arvore.
-//        func soma(r *Nodo) int {...}
-//   1.b) uma operação concorrente que soma todos elementos da arvore
-//   [OS ACIMA ESTAO RESOLVIDOS]
-//   2.a) a operação de busca de um elemento v, dizendo true se encontrou v na árvore, ou falso
-//        func busca(r* Nodo, v int) bool {}...}
-//   2.b) a operação de busca concorrente de um elemento, que informa imediatamente
-//        por um canal se encontrou o elemento (sem acabar a busca), ou informa
-//        que nao encontrou ao final da busca
-//   3.a) a operação que escreve todos pares em um canal de saidaPares e
-//        todos impares em um canal saidaImpares, e ao final avisa que acabou em um canal fin
-//        func retornaParImpar(r *Nodo, saidaP chan int, saidaI chan int, fin chan struct{}){...}
-//   3.b) a versao concorrente da operação acima, ou seja, os varios nodos sao testados
-//        concorrentemente se pares ou impares, escrevendo o valor no canal adequado
-//
-//  ABAIXO: RESPOSTAS A QUESTOES 1a e b
-//  APRESENTE A SOLUÇÃO PARA AS DEMAIS QUESTÕES
-
 package main
 
 import (
@@ -40,7 +19,7 @@ func caminhaERD(r *Nodo) {
 }
 
 // -------- SOMA ----------
-// soma sequencial recursiva
+// Soma sequencial recursiva
 func soma(r *Nodo) int {
 	if r != nil {
 		//fmt.Print(r.v, ", ")
@@ -49,9 +28,7 @@ func soma(r *Nodo) int {
 	return 0
 }
 
-// funcao "wraper" retorna valor
-// internamente dispara recursao com somaConcCh
-// usando canais
+// Funcao "wraper" retorna valor nternamente dispara recursao com somaConcCh usando canais.
 func somaConc(r *Nodo) int {
 	s := make(chan int)
 	go somaConcCh(r, s)
@@ -69,16 +46,104 @@ func somaConcCh(r *Nodo, s chan int) {
 }
 
 // -------- BUSCA ----------
-// busca sequencial recursiva
-// func busca(r *Nodo, val int) bool { }
+// Busca sequencial recursiva:
+func busca(r *Nodo, val int) bool {
+	if r == nil {
+		return false
+	}
+	if r.v == val {
+		return true
+	}
+	return busca(r.e, val) || busca(r.d, val)
+}
 
-// busca concorrente recursiva
-// func buscaConc(r *Nodo, val int, ret chan bool) { }
+// Busca concorrente recursiva:
+func buscaC(r *Nodo, val int) bool {
+	resultado := make(chan bool, 1)
+	go buscaConc(r, val, resultado)
+	return <-resultado
+}
+
+func buscaConc(r *Nodo, val int, ret chan bool) {
+	if r == nil {
+		ret <- false
+		return
+	}
+	if r.v == val {
+		ret <- true
+		return
+	}
+
+	retE := make(chan bool, 1)
+	retD := make(chan bool, 1)
+
+	go buscaConc(r.e, val, retE)
+	go buscaConc(r.d, val, retD)
+
+	// Se qualquer um encontrar, retorna true
+	for i := 0; i < 2; i++ {
+		select {
+		case resE := <-retE:
+			if resE {
+				ret <- true
+				return
+			}
+		case resD := <-retD:
+			if resD {
+				ret <- true
+				return
+			}
+		}
+	}
+	ret <- false
+}
 
 // -------- SAIDAS PAR E IMPAR --------
 // Sequencial
 
-//func retornaParImpar(r *Nodo, saidaP chan int, saidaI chan int, fin chan struct{}) { }
+func retornaParImpar(r *Nodo, saidaP chan int, saidaI chan int, fin chan struct{}) {
+	if r != nil {
+		if r.v%2 == 0 {
+			saidaP <- r.v
+		} else {
+			saidaI <- r.v
+		}
+		retornaParImpar(r.e, saidaP, saidaI, fin)
+		retornaParImpar(r.d, saidaP, saidaI, fin)
+	} else {
+		fin <- struct{}{}
+	}
+}
+
+// Versão concorrente de retornaParImpar
+func retornaParImparConc(r *Nodo, saidaP chan int, saidaI chan int, fin chan struct{}) {
+	if r == nil {
+		fin <- struct{}{}
+		return
+	}
+
+	// Processa o nó atual
+	if r.v%2 == 0 {
+		saidaP <- r.v
+	} else {
+		saidaI <- r.v
+	}
+
+	// Canais para sincronização das subárvores
+	finE := make(chan struct{})
+	finD := make(chan struct{})
+
+	// Processa subárvores concorrentemente
+	go retornaParImparConc(r.e, saidaP, saidaI, finE)
+	go retornaParImparConc(r.d, saidaP, saidaI, finD)
+
+	// Espera ambas as subárvores terminarem
+	<-finE
+	<-finD
+
+	// Sinaliza que terminou
+	fin <- struct{}{}
+}
 
 // ---------   agora vamos criar a arvore e usar as funcoes acima
 
