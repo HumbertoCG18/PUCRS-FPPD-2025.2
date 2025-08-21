@@ -10,7 +10,7 @@
 //    1) A topologia criada no exemplo abaixo é um **grafo aciclico dirigido.**
 //       cada aresta tem somente uma direcao (ex.: 0 manda para 1, mas 1 nao manda para 0)
 //       Assim, um nodo pode receber mais de uma vez uma mensagem,
-//       mas nesta topologia a mensagem nao entra em ciclo.
+//       mas nesta topologia a mensagem nao entr	a em ciclo.
 
 // EXERCÍCIO:
 //    1) Rode o exemplo.   note que cada mensagem é repassada mais de uma vez em alguns nodos
