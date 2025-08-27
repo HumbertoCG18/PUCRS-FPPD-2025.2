@@ -14,8 +14,7 @@ type Request struct {
 	ch_ret chan int
 }
 
-// ------------------------------------
-// cliente
+// --------- Cliente
 func cliente(i int, req chan Request) {
 	var v, r int
 	my_ch := make(chan int)
@@ -27,8 +26,7 @@ func cliente(i int, req chan Request) {
 	}
 }
 
-// ------------------------------------
-// servidor sequencial
+// --------- Servidor sequencial
 func servidorSeq(in chan Request) {
 	for {
 		req := <-in
