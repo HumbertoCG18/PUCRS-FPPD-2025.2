@@ -1,18 +1,3 @@
-// Disciplina de Modelos de Computacao Concorrente
-// Escola Politecnica - PUCRS
-// Prof.  Fernando Dotti
-
-// rode o programa abaixo
-// em um browser na sua máquina entre:
-//     http://127.0.0.1:8080    ou
-//     http://127.0.0.1:8080/help   ou
-//     http://127.0.0.1:8080/f1
-//
-// As funcoes helloWorld, help e f1 abaixo serão respectivamente
-// ativadas no servidor, gerando a resposta enviada ao browser
-// tente entender o modelo subjascente de troca de mensagens e
-// tratamento de conexoes (canais)
-
 package main
 
 import (
