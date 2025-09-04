@@ -16,27 +16,29 @@ const (
 )
 
 type Barbershop struct {
-	customers     int
-	mutex         sync.Mutex
-	standingRoom  chan struct{}
-	sofa          chan struct{}
-	chairs        chan struct{}
-	customerReady chan struct{}
-	barberReady   chan struct{}
-	payment       chan struct{}
-	receipt       chan struct{}
+	shopLimit     chan struct{} // limite total da loja
+	standingRoom  chan struct{} // clientes em pé
+	sofa          chan struct{} // sofá
+	chairs        chan struct{} // cadeiras de barbeiro
+	customerReady chan int      // cliente pronto para cortar
+	barberReady   chan int      // barbeiro confirma
+	payment       chan int      // cliente pronto para pagar
+	receipt       chan int      // barbeiro confirma pagamento
 }
 
 func barber(id int, shop *Barbershop) {
 	for {
-		<-shop.customerReady           // espera cliente
-		shop.barberReady <- struct{}{} // confirma que vai cortar
+		// espera cliente
+		cid := <-shop.customerReady
+		shop.barberReady <- cid
 
-		// cortar cabelo
+		// corta cabelo
 		time.Sleep(time.Duration(rand.Intn(100)+100) * time.Millisecond)
 
-		<-shop.payment // espera pagamento
-		shop.receipt <- struct{}{}
+		// espera pagamento
+		cid = <-shop.payment
+		time.Sleep(time.Duration(rand.Intn(50)+50) * time.Millisecond) // caixa
+		shop.receipt <- cid
 	}
 }
 
@@ -44,37 +46,32 @@ func customer(id int, shop *Barbershop, wg *sync.WaitGroup) {
 	defer wg.Done()
 	time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
 
-	// Entrando na loja
-	shop.mutex.Lock()
-	if shop.customers == shopCapacity {
-		shop.mutex.Unlock()
+	// tenta entrar na loja
+	select {
+	case shop.shopLimit <- struct{}{}:
+		// entrou
+	default:
 		fmt.Printf("Cliente %d: loja cheia, indo embora.\n", id)
 		return
 	}
-	shop.customers++
-	shop.mutex.Unlock()
 
-	// Espera em pé → sofá → cadeira
+	// espera em pé → sofá → cadeira
 	shop.standingRoom <- struct{}{}
 	shop.sofa <- struct{}{}
 	<-shop.standingRoom
 	shop.chairs <- struct{}{}
 	<-shop.sofa
 
-	// Corte
-	shop.customerReady <- struct{}{}
+	// corte
+	shop.customerReady <- id
 	<-shop.barberReady
 
-	// Pagamento
-	shop.payment <- struct{}{}
+	// pagamento
+	shop.payment <- id
 	<-shop.receipt
 
-	<-shop.chairs // libera cadeira
-
-	// Saindo
-	shop.mutex.Lock()
-	shop.customers--
-	shop.mutex.Unlock()
+	<-shop.chairs    // libera cadeira
+	<-shop.shopLimit // sai da loja
 
 	fmt.Printf("Cliente %d saiu.\n", id)
 }
@@ -83,13 +80,14 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 
 	shop := &Barbershop{
+		shopLimit:     make(chan struct{}, shopCapacity),
 		standingRoom:  make(chan struct{}, standingCap),
 		sofa:          make(chan struct{}, sofaCapacity),
 		chairs:        make(chan struct{}, barberChairs),
-		customerReady: make(chan struct{}),
-		barberReady:   make(chan struct{}),
-		payment:       make(chan struct{}),
-		receipt:       make(chan struct{}),
+		customerReady: make(chan int),
+		barberReady:   make(chan int),
+		payment:       make(chan int),
+		receipt:       make(chan int),
 	}
 
 	// inicia barbeiros
