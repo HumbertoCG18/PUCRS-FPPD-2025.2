@@ -1,7 +1,0 @@
-[
-    {
-        "key": "ctrl+alt+shift",
-        "command": "github.copilot.toggleCopilotSuggestion",
-        "when": "editorTextFocus"
-    }
-]
