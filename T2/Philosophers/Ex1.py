@@ -53,3 +53,4 @@ if __name__ == "__main__":
 
     for f in filosofos:
         f.join()
+
