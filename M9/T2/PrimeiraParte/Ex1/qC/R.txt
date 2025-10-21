@@ -1,0 +1,5 @@
+Q.C.1 - Descreva como é a saída gerada pela execução de questaoC()
+A saída é uma sequencia determinística, cíclica e infinita:
+                    0, 1, 2, ..., 39
+Cada número em uma linha, sem intervaling. Existe apenas um token circulando pelos por canais não bufferizados, logo, uma go routine é imprimida por vez, na ordem do anel.
+

@@ -1,0 +1,8 @@
+Q.B.1 - Qual o número de processos ativos neste ponto?
+11. 1 go rotine da main + 10 go routine qB. Algumas podem estar bloqueadas no envio pelo canal, pois estão agurdando o recebedor. Mas mesmo assim estão ativas.
+
+Q.B.2 - Qual o número de processos ativos neste ponto?
+1 (uma). Só sobra a go routine main; as 10 qB ja encerraram.
+
+Q.B.3 -  Como podem ser as possíveis saídas de "questaoB()"?
+Sempre vai ter 10 linhas impressas, contendo os inteiros do intervalo {0 - 9}, cada um uma unica vez, em ordem arbitrária. Isso acontece pois todas as 10 go routines são obrigadas a executar (a main aguarda 10 recebimentos no canal), mas o agendador define a ordem das impressões. 

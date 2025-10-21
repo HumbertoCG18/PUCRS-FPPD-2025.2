@@ -1,0 +1,9 @@
+Q.D.1 - Marque a(s) resposta(s) possível(is) para o comportamento da questaoD()":
+b) prints de sequencias de ab's
+Justificativa:
+É possivel sair "ababab..." ou "bababa..." se, na prática, o agendador trocar quem faz o envio de cada recebimento.
+
+d) prints de qualquer sequencia composta por a's e b's,
+Justificativa:
+Como o agendamento não é determinístico e não há garantia de equidade (fairness) entre as go routines, logo é possivel que quaisquer sequencias sobre o alfabeto {a, b}, inclusive somente "a..." ou somente "b...".
+

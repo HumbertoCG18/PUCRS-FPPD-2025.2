@@ -1,0 +1,4 @@
+Q.A.1 - [1, 11] goroutines ativas.
+Mínima 1, máxima 11.
+
+Q.A.2 - A saída é um subconjunto de { 0 - 9}, cada número no máximo uma vez, em ordem arbitrária, pois não há sincronização/espera para as goroutines terminarem
