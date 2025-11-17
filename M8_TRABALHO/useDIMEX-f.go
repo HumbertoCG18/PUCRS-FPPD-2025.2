@@ -1,97 +1,115 @@
-// Construido como parte da disciplina: Sistemas Distribuidos - PUCRS - Escola Politecnica
-//  Professor: Fernando Dotti  (https://fldotti.github.io/)
-// Uso p exemplo:
-//   go run usaDIMEX-f.go 0 127.0.0.1:5000  127.0.0.1:6001  127.0.0.1:7002
-//   go run usaDIMEX-f.go 1 127.0.0.1:5000  127.0.0.1:6001  127.0.0.1:7002
-//   go run usaDIMEX-f.go 2 127.0.0.1:5000  127.0.0.1:6001  127.0.0.1:7002
-// ----------
-// LANCAR N PROCESSOS EM SHELL's DIFERENTES, UMA PARA CADA PROCESSO.
-// para cada processo fornecer: seu id único (0, 1, 2 ...) e a mesma lista de processos.
-// o endereco de cada processo é o dado na lista, na posicao do seu id.
-// no exemplo acima o processo com id=1  usa a porta 6001 para receber e as portas
-// 5000 e 7002 para mandar mensagens respectivamente para processos com id=0 e 2
-// -----------
-// Esta versão supõe que todos processos tem acesso a um mesmo arquivo chamado "mxOUT.txt"
-// Todos processos escrevem neste arquivo, usando o protocolo dimex para exclusao mutua.
-// Os processos escrevem "|." cada vez que acessam o arquivo.   Assim, o arquivo com conteúdo
-// correto deverá ser uma sequencia de
-// |.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.
-// |.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.
-// |.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.
-// etc etc ...     ....  até o usuário interromper os processos (ctl c).
-// Qualquer padrao diferente disso, revela um erro.
-//      |.|.|.|.|.||..|.|.|.  etc etc  por exemplo.
-// Se voce retirar o protocolo dimex vai ver que o arquivo poderá entrelacar
-// "|."  dos processos de diversas diferentes formas.
-// Ou seja, o padrão correto acima é garantido pelo dimex.
-// Ainda assim, isto é apenas um teste.  E testes são frágeis em sistemas distribuídos.
-
 //go:build dimexf
 // +build dimexf
 
 package main
 
 import (
-	"SD/DIMEX"
 	"fmt"
+	"net"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
+
+	"SD/DIMEX"
 )
+
+// waitForPeers tenta conectar a cada endereço (exceto self) repetidamente
+// até que todos respondam ao Dial (ou até timeout total).
+func waitForPeers(selfIdx int, addrs []string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for {
+		allUp := true
+		for i, a := range addrs {
+			if i == selfIdx {
+				continue
+			}
+			conn, err := net.DialTimeout("tcp", a, 800*time.Millisecond)
+			if err != nil {
+				allUp = false
+				// não precisa logar tudo, mas loga uma vez por ciclo
+				//fmt.Println("peer not ready:", a, err)
+				break
+			}
+			_ = conn.Close()
+		}
+		if allUp {
+			return
+		}
+		if time.Now().After(deadline) {
+			// timeout: ainda assim retorna (evita loop infinito). Caller decide.
+			fmt.Println("waitForPeers: timeout reached — proceeding anyway")
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
 
 func main() {
 
 	if len(os.Args) < 2 {
-		fmt.Println("Please specify at least one address:port!")
-		fmt.Println("go run useDIMEX-f.go 0 127.0.0.1:5000  127.0.0.1:6001  127.0.0.1:7002 ")
-		fmt.Println("go run useDIMEX-f.go 1 127.0.0.1:5000  127.0.0.1:6001  127.0.0.1:7002 ")
-		fmt.Println("go run useDIMEX-f.go 2 127.0.0.1:5000  127.0.0.1:6001  127.0.0.1:7002 ")
+		fmt.Println("Please specify id and addresses!")
 		return
 	}
 
 	id, _ := strconv.Atoi(os.Args[1])
 	addresses := os.Args[2:]
-	// fmt.Print("id: ", id, "   ") fmt.Println(addresses)
 
-	var dmx *DIMEX.DIMEX_Module = DIMEX.NewDIMEX(addresses, id, true)
+	dmx := DIMEX.NewDIMEX(addresses, id, true)
 	fmt.Println(dmx)
 
-	// abre arquivo que TODOS processos devem poder usar
-	file, err := os.OpenFile("./mxOUT.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		fmt.Println("Error opening file:", err)
-		return
-	}
-	defer file.Close() // Ensure the file is closed at the end of the function
+	// captura CTRL+C para tentar sair limpo
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-quit
+		fmt.Println("\nSIGINT recebido — encerrando com limpeza...")
+		// aqui podemos fazer limpeza adicional se necessário
+		os.Exit(0)
+	}()
 
-	// espera para facilitar inicializacao de todos processos (a mao)
-	time.Sleep(3 * time.Second)
+	// espera curta para dar tempo do listener interno do PP2PLink subir
+	// (o NewDIMEX já cria e starta o PP2PLink), mas aguardamos também os peers:
+	fmt.Println("Aguardando peers ficarem disponíveis (timeout 10s)...")
+	waitForPeers(id, addresses, 10*time.Second)
+	// espera extra
+	time.Sleep(500 * time.Millisecond)
 
+	// loop principal: solicita e usa MX, escreve no arquivo, libera
 	for {
-		// SOLICITA ACESSO AO DIMEX
-		fmt.Println("[ APP id: ", id, " PEDE   MX ]")
+		fmt.Println("[ APP id:", id, " PEDINDO MX ]")
 		dmx.Req <- DIMEX.ENTER
-		//fmt.Println("[ APP id: ", id, " ESPERA MX ]")
-		// ESPERA LIBERACAO DO MODULO DIMEX
-		<-dmx.Ind //
 
-		// A PARTIR DAQUI ESTA ACESSANDO O ARQUIVO SOZINHO
-		_, err = file.WriteString("|") // marca entrada no arquivo
-		if err != nil {
-			fmt.Println("Error writing to file:", err)
-			return
-		}
+		// aguarda autorização do DIMEX
+		<-dmx.Ind
+		fmt.Println("[ APP id:", id, " ENTROU MX ]")
 
-		fmt.Println("[ APP id: ", id, " *EM*   MX ]")
+		// tenta abrir/escrever no arquivo mas NÃO encerra o programa em caso de erro
+		func() {
+			file, err := os.OpenFile("./mxOUT.txt",
+				os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				fmt.Println("Erro abrindo arquivo (não fatal):", err)
+				return
+			}
+			defer func() {
+				_ = file.Sync()
+				_ = file.Close()
+			}()
 
-		_, err = file.WriteString(".") // marca saida no arquivo
-		if err != nil {
-			fmt.Println("Error writing to file:", err)
-			return
-		}
+			_, err = file.WriteString("|.")
+			if err != nil {
+				fmt.Println("Erro escrevendo no arquivo (não fatal):", err)
+				return
+			}
+		}()
 
-		// AGORA VAI LIBERAR O ARQUIVO PARA OUTROS
-		dmx.Req <- DIMEX.EXIT //
-		fmt.Println("[ APP id: ", id, " FORA   MX ]")
+		// sinaliza saída da seção crítica
+		dmx.Req <- DIMEX.EXIT
+		fmt.Println("[ APP id:", id, " SAIU MX ]")
+
+		// aguarda um pouco antes de pedir de novo (reduz bursts)
+		time.Sleep(500 * time.Millisecond)
 	}
 }

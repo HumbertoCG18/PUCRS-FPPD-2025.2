@@ -1,19 +1,3 @@
-/*
-  Construido como parte da disciplina: Sistemas Distribuidos - PUCRS - Escola Politecnica
-  Professor: Fernando Dotti  (https://fldotti.github.io/)
-  Modulo representando Perfect Point to Point Links tal como definido em:
-    Introduction to Reliable and Secure Distributed Programming
-    Christian Cachin, Rachid Gerraoui, Luis Rodrigues
-  * Semestre 2018/2 - Primeira versao.  Estudantes:  Andre Antonitsch e Rafael Copstein
-  * Semestre 2019/1 - Reaproveita conexões TCP já abertas - Estudantes: Vinicius Sesti e Gabriel Waengertner
-  * Semestre 2020/1 - Separa mensagens de qualquer tamanho atee 4 digitos.
-  Sender envia tamanho no formato 4 digitos (preenche com 0s a esquerda)
-  Receiver recebe 4 digitos, calcula tamanho do buffer a receber,
-  e recebe com io.ReadFull o tamanho informado - Dotti
-  * Semestre 2022/1 - melhorias eliminando retorno de erro aos canais superiores.
-  se conexao fecha nao retorna nada.   melhorias em comentarios.   adicionado modo debug. - Dotti
-*/
-
 package PP2PLink
 
 import (
@@ -21,6 +5,8 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"sync"
+	"time"
 )
 
 type PP2PLink_Req_Message struct {
@@ -38,13 +24,14 @@ type PP2PLink struct {
 	Req   chan PP2PLink_Req_Message
 	Run   bool
 	dbg   bool
-	Cache map[string]net.Conn // cache de conexoes - reaproveita conexao com destino ao inves de abrir outra
+	Cache map[string]net.Conn // cache de conexoes
+	mu    sync.Mutex          // protege Cache
 }
 
 func NewPP2PLink(_address string, _dbg bool) *PP2PLink {
 	p2p := &PP2PLink{
-		Req:   make(chan PP2PLink_Req_Message, 1),
-		Ind:   make(chan PP2PLink_Ind_Message, 1),
+		Req:   make(chan PP2PLink_Req_Message, 16),
+		Ind:   make(chan PP2PLink_Ind_Message, 16),
 		Run:   true,
 		dbg:   _dbg,
 		Cache: make(map[string]net.Conn)}
@@ -60,95 +47,212 @@ func (module *PP2PLink) outDbg(s string) {
 }
 
 func (module *PP2PLink) Start(address string) {
-
-	// PROCESSO PARA RECEBIMENTO DE MENSAGENS
+	// LISTENER (recebimento)
 	go func() {
-		listen, _ := net.Listen("tcp4", address)
+		listen, err := net.Listen("tcp4", address)
+		if err != nil {
+			module.outDbg("erro ao criar listener: " + err.Error())
+			return
+		}
+		module.outDbg("ok   : listener criado em " + address)
 		for {
-			// aceita repetidamente tentativas novas de conexao
 			conn, err := listen.Accept()
+			if err != nil {
+				// não mata o listener por erro temporário
+				module.outDbg("erro accept: " + err.Error())
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
 			module.outDbg("ok   : conexao aceita com outro processo.")
-			// para cada conexao lanca rotina de tratamento
-			go func() {
-				// repetidamente recebe mensagens na conexao TCP (sem fechar)
-				// e passa para modulo de cima
-				for { //                              // enquanto conexao aberta
-					if err != nil {
-						fmt.Println(".", err)
-						break
-					}
-					bufTam := make([]byte, 4) //       // le tamanho da mensagem
-					_, err := io.ReadFull(conn, bufTam)
-					if err != nil {
-						module.outDbg("erro : " + err.Error() + " conexao fechada pelo outro processo.")
-						break
-					}
-					tam, err := strconv.Atoi(string(bufTam))
-					bufMsg := make([]byte, tam)        // declara buffer do tamanho exato
-					_, err = io.ReadFull(conn, bufMsg) // le do tamanho do buffer ou da erro
-					if err != nil {
-						fmt.Println("@", err)
-						break
-					}
-					msg := PP2PLink_Ind_Message{
-						From:    conn.RemoteAddr().String(),
-						Message: string(bufMsg)}
-					// ATE AQUI:  procedimentos para receber msg
-					module.Ind <- msg //               // repassa mensagem para modulo superior
-				}
-			}()
+			// garante configuração TCP em conexões aceitas
+			if tcpConn, ok := conn.(*net.TCPConn); ok {
+				_ = tcpConn.SetKeepAlive(true)
+				_ = tcpConn.SetKeepAlivePeriod(30 * time.Second)
+				_ = tcpConn.SetLinger(0)
+			}
+			// handler para cada conexão aceita
+			go module.handleIncoming(conn)
 		}
 	}()
 
-	// PROCESSO PARA ENVIO DE MENSAGENS
+	// SENDER (envio a partir do canal Req)
 	go func() {
 		for {
 			message := <-module.Req
+			if !module.Run {
+				return
+			}
 			module.Send(message)
 		}
 	}()
 }
 
-func (module *PP2PLink) Send(message PP2PLink_Req_Message) {
-	var conn net.Conn
-	var ok bool
-	var err error
+// handleIncoming lê mensagens de uma conexão aceita e repassa ao módulo superior.
+// Fecha a conexão quando a outra ponta cai; não derruba o listener.
+func (module *PP2PLink) handleIncoming(conn net.Conn) {
+	defer func() {
+		_ = conn.Close()
+		module.outDbg("conexao handler finalizado: " + conn.RemoteAddr().String())
+	}()
 
-	// ja existe uma conexao aberta para aquele destinatario?
-	if conn, ok = module.Cache[message.To]; ok {
-	} else { // se nao existe, abre e guarda na cache
-		conn, err = net.Dial("tcp", message.To)
-		module.outDbg("ok   : conexao iniciada com outro processo")
+	for {
+		// le 4 bytes do tamanho
+		bufTam := make([]byte, 4)
+		_, err := io.ReadFull(conn, bufTam)
 		if err != nil {
-			fmt.Println(err)
+			if err == io.EOF {
+				module.outDbg("conexao fechada pelo remoto: " + conn.RemoteAddr().String())
+			} else {
+				module.outDbg("erro leitura tam: " + err.Error() + " de " + conn.RemoteAddr().String())
+			}
 			return
 		}
-		module.Cache[message.To] = conn
+
+		tam, err := strconv.Atoi(string(bufTam))
+		if err != nil || tam < 0 {
+			module.outDbg("tamanho inválido recebido: '" + string(bufTam) + "' de " + conn.RemoteAddr().String())
+			return
+		}
+
+		bufMsg := make([]byte, tam)
+		_, err = io.ReadFull(conn, bufMsg)
+		if err != nil {
+			module.outDbg("erro leitura msg: " + err.Error() + " de " + conn.RemoteAddr().String())
+			return
+		}
+
+		msg := PP2PLink_Ind_Message{
+			From:    conn.RemoteAddr().String(),
+			Message: string(bufMsg)}
+		// envia para módulo superior (pode bloquear se nao houver receptor; isso é intencional)
+		module.Ind <- msg
 	}
-	// calcula tamanho da mensagem e monta string de 4 caracteres numericos com o tamanho.
-	// completa com 0s aa esquerda para fechar tamanho se necessario.
-	str := strconv.Itoa(len(message.Message))
-	for len(str) < 4 {
-		str = "0" + str
+}
+
+// getCachedConn retorna uma conexão da cache (protegida) se existir
+func (module *PP2PLink) getCachedConn(addr string) (net.Conn, bool) {
+	module.mu.Lock()
+	defer module.mu.Unlock()
+	c, ok := module.Cache[addr]
+	return c, ok
+}
+
+// setCachedConn guarda uma conexão na cache (protegida)
+func (module *PP2PLink) setCachedConn(addr string, c net.Conn) {
+	module.mu.Lock()
+	module.Cache[addr] = c
+	module.mu.Unlock()
+}
+
+// delCachedConn remove e fecha a conexão cache se existir
+func (module *PP2PLink) delCachedConn(addr string) {
+	module.mu.Lock()
+	if c, ok := module.Cache[addr]; ok {
+		_ = c.Close()
+		delete(module.Cache, addr)
 	}
-	if !(len(str) == 4) {
-		module.outDbg("ERROR AT PPLINK MESSAGE SIZE CALCULATION - INVALID MESSAGES MAY BE IN TRANSIT")
+	module.mu.Unlock()
+}
+
+// dialWithOpts tenta abrir conexão TCP com opções e reconexões curtas
+func (module *PP2PLink) dialWithOpts(addr string) (net.Conn, error) {
+	var conn net.Conn
+	var err error
+	backoff := []time.Duration{0, 150 * time.Millisecond, 300 * time.Millisecond}
+	for _, delay := range backoff {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		conn, err = net.DialTimeout("tcp", addr, 2*time.Second)
+		if err == nil {
+			// garante opções TCP
+			if tcpConn, ok := conn.(*net.TCPConn); ok {
+				_ = tcpConn.SetKeepAlive(true)
+				_ = tcpConn.SetKeepAlivePeriod(30 * time.Second)
+				_ = tcpConn.SetLinger(0)
+			}
+			module.outDbg("ok   : conexao iniciada com outro processo")
+			return conn, nil
+		}
+		// loga e tenta novamente
+		module.outDbg("erro dial " + addr + " : " + err.Error())
 	}
-	_, err = fmt.Fprintf(conn, str)             // escreve 4 caracteres com tamanho
-	_, err = fmt.Fprintf(conn, message.Message) // escreve a mensagem com o tamanho calculado
+	return nil, err
+}
+
+// safeWrite faz múltiplas tentativas de escrita (uma única re-dial se necessário)
+func (module *PP2PLink) safeWrite(conn net.Conn, data []byte) error {
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, err := conn.Write(data)
+	if err == nil {
+		return nil
+	}
+	// se erro, tenta reescrever após pequena espera (mas sem fechar de imediato aqui)
+	module.outDbg("erro write: " + err.Error())
+	return err
+}
+
+// Send envia uma mensagem ao endereço. tenta reaproveitar conexao; em caso de erro tenta reconectar.
+func (module *PP2PLink) Send(message PP2PLink_Req_Message) {
+	// prepara payload: 4-digit length + message bytes
+	msgBytes := []byte(message.Message)
+	lengthStr := strconv.Itoa(len(msgBytes))
+	for len(lengthStr) < 4 {
+		lengthStr = "0" + lengthStr
+	}
+	header := []byte(lengthStr)
+
+	// tenta usar conexao cacheada
+	conn, ok := module.getCachedConn(message.To)
+	if ok && conn != nil {
+		// tentativa de escrita com a conexao existente
+		if err := module.safeWrite(conn, header); err == nil {
+			if err := module.safeWrite(conn, msgBytes); err == nil {
+				return // sucesso usando conexao cacheada
+			}
+		}
+		// se falhou, removemos a conexao considerada ruim e fechamos
+		module.outDbg("conexao cacheada apresentou erro, removendo cache e tentando reconectar: " + message.To)
+		module.delCachedConn(message.To)
+	}
+
+	// tenta dial/reconectar e escrever
+	conn, err := module.dialWithOpts(message.To)
 	if err != nil {
-		module.outDbg("erro : " + err.Error() + ". Conexao fechada. 1 tentativa de reabrir:")
-		conn, err = net.Dial("tcp", message.To)
-		if err != nil {
-			//fmt.Println(err)
-			module.outDbg("       " + err.Error())
-			return
-		} else {
-			module.outDbg("ok   : conexao iniciada com outro processo.")
-		}
-		module.Cache[message.To] = conn
-		_, err = fmt.Fprintf(conn, str)             // escreve 4 caracteres com tamanho
-		_, err = fmt.Fprintf(conn, message.Message) // escreve a mensagem com o tamanho calculado
+		// falha em conectar
+		module.outDbg("falha ao conectar para " + message.To + " : " + err.Error())
+		return
 	}
-	return
+	// armazena na cache antes de usar para outras goroutines
+	module.setCachedConn(message.To, conn)
+
+	// tenta enviar; se falhar, tenta uma reconexao única
+	if err := module.safeWrite(conn, header); err != nil {
+		module.outDbg("erro ao escrever header apos reconectar: " + err.Error())
+		module.delCachedConn(message.To)
+		// tenta uma reconexao final
+		conn2, err2 := module.dialWithOpts(message.To)
+		if err2 != nil {
+			module.outDbg("reconexao final falhou: " + err2.Error())
+			return
+		}
+		module.setCachedConn(message.To, conn2)
+		if err := module.safeWrite(conn2, header); err != nil {
+			module.outDbg("erro ao escrever header apos reconexao final: " + err.Error())
+			return
+		}
+		if err := module.safeWrite(conn2, msgBytes); err != nil {
+			module.outDbg("erro ao escrever msg apos reconexao final: " + err.Error())
+			return
+		}
+		return
+	}
+
+	// envia corpo
+	if err := module.safeWrite(conn, msgBytes); err != nil {
+		module.outDbg("erro ao escrever msg apos conectar: " + err.Error())
+		// remove cache para tentar reconectar na proxima vez
+		module.delCachedConn(message.To)
+		return
+	}
 }
